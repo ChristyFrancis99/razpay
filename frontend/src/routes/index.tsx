@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { DemoEntry } from "@/components/DemoEntry";
+import { DirectPlatform } from "@/components/DirectPlatform";
 
 export const Route = createFileRoute("/")({
-  component: DemoEntry,
+  component: DirectPlatform,
 });
