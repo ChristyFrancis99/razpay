@@ -31,10 +31,28 @@ class UserCreateRequest(BaseModel):
     role: str = "INVESTIGATOR"
 
 
-def _ensure_bootstrap_admin(db: Session) -> None:
+def _ensure_bootstrap_admin(db: Session) -> User | None:
     if db.query(User).count() == 0 and settings.DEFAULT_ADMIN_PASSWORD:
-        db.add(User(username=settings.DEFAULT_ADMIN_USERNAME, password_hash=hash_password(settings.DEFAULT_ADMIN_PASSWORD), role="ADMINISTRATOR", is_active=1))
+        user = User(
+            username=settings.DEFAULT_ADMIN_USERNAME,
+            password_hash=hash_password(settings.DEFAULT_ADMIN_PASSWORD),
+            role="ADMINISTRATOR",
+            is_active=1,
+        )
+        db.add(user)
         db.commit()
+        db.refresh(user)
+        return user
+    return db.query(User).filter(User.username == settings.DEFAULT_ADMIN_USERNAME).first()
+
+
+def _token_for_user(user: User) -> LoginResponse:
+    token = create_access_token(user.id, user.username, user.role)
+    return LoginResponse(
+        access_token=token,
+        expires_in=settings.ACCESS_TOKEN_TTL_SECONDS,
+        user={"id": user.id, "username": user.username, "role": user.role},
+    )
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -43,8 +61,20 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == payload.username).first()
     if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    token = create_access_token(user.id, user.username, user.role)
-    return LoginResponse(access_token=token, expires_in=settings.ACCESS_TOKEN_TTL_SECONDS, user={"id": user.id, "username": user.username, "role": user.role})
+    return _token_for_user(user)
+
+
+@router.post("/demo", response_model=LoginResponse)
+def demo_login(db: Session = Depends(get_db)):
+    """Local/demo convenience login. Never enabled outside development."""
+    if settings.ENVIRONMENT.lower() not in {"development", "dev", "local"}:
+        raise HTTPException(status_code=404, detail="Not found")
+    user = _ensure_bootstrap_admin(db)
+    if not user:
+        raise HTTPException(status_code=503, detail="Configure DEFAULT_ADMIN_PASSWORD for local demo access")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Demo administrator is inactive")
+    return _token_for_user(user)
 
 
 @router.get("/me")
