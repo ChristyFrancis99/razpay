@@ -5,10 +5,11 @@ from sqlalchemy.orm import Session
 
 from app.database.database import get_db
 from app.models.schemas import DecisionRequest, DecisionResponse
-from app.services import fraud_service, audit_service
-from app.services.risk_service import score_to_level, decision_for_level
+from app.services import audit_service, fraud_service
+from app.services.risk_service import decision_for_level, score_to_level
 
 router = APIRouter(prefix="/api/risk", tags=["risk"])
+VALID_DECISIONS = {"ALLOW", "REVIEW", "HOLD"}
 
 
 @router.get("/{transaction_id}")
@@ -31,10 +32,21 @@ def make_decision(payload: DecisionRequest, db: Session = Depends(get_db)):
     if not record:
         raise HTTPException(status_code=404, detail=f"Transaction '{payload.transaction_id}' not found.")
 
-    risk_level = score_to_level(payload.risk_score)
-    recommended = decision_for_level(risk_level)
-    final_decision = payload.override_decision or recommended
+    # Never trust a client-supplied risk score for an existing transaction.
+    # The persisted model result is the source of truth for the audit record.
+    risk_score = int(record.risk_score)
+    if payload.risk_score != risk_score:
+        raise HTTPException(status_code=409, detail="Risk score is stale. Refresh the transaction before recording a decision.")
 
+    risk_level = score_to_level(risk_score)
+    recommended = decision_for_level(risk_level)
+    override = payload.override_decision.upper() if payload.override_decision else None
+    if override and override not in VALID_DECISIONS:
+        raise HTTPException(status_code=422, detail="override_decision must be ALLOW, REVIEW, or HOLD.")
+    if not payload.reason or len(payload.reason.strip()) < 5:
+        raise HTTPException(status_code=422, detail="A decision reason of at least 5 characters is required.")
+
+    final_decision = override or recommended
     previous_decision = record.final_decision or record.recommended_decision
     record.final_decision = final_decision
     db.commit()
@@ -44,16 +56,16 @@ def make_decision(payload: DecisionRequest, db: Session = Depends(get_db)):
         transaction_id=payload.transaction_id,
         previous_decision=previous_decision,
         new_decision=final_decision,
-        risk_score=payload.risk_score,
+        risk_score=risk_score,
         actor=payload.actor or "system",
-        reason=payload.reason or "Decision recorded via /api/risk/decision.",
+        reason=payload.reason.strip(),
     )
 
     return DecisionResponse(
         transaction_id=payload.transaction_id,
-        risk_score=payload.risk_score,
+        risk_score=risk_score,
         risk_level=risk_level,
         recommended_decision=recommended,
         final_decision=final_decision,
-        decision_reason=payload.reason or f"Decision set to {final_decision} (recommended: {recommended}).",
+        decision_reason=payload.reason.strip(),
     )
