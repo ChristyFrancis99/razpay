@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { RiskDashboard } from "@/components/RiskDashboard";
+import { PlatformShell } from "@/components/PlatformShell";
 
 export const Route = createFileRoute("/")({
-  component: RiskDashboard,
+  component: PlatformShell,
 });
