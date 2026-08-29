@@ -2,8 +2,12 @@
 import os
 from pathlib import Path
 from functools import lru_cache
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parents[2]
+# FastAPI/uvicorn does not automatically load backend/.env. Load it before
+# constructing Settings so local bootstrap credentials and CORS settings work.
+load_dotenv(BASE_DIR / ".env", override=False)
 
 
 def _get_bool(name: str, default: bool) -> bool:
