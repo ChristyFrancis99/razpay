@@ -1,0 +1,155 @@
+"""
+Real-time Transaction Copilot (STEP 14).
+
+Answers natural-language questions about a transaction or merchant using
+ONLY facts actually available from the fraud model / risk engine / merchant
+service — it never invents transaction facts.
+
+Two modes:
+ - LLM mode: if settings.LLM_API_KEY + LLM_PROVIDER are configured, an LLM is
+   used to phrase the answer, but it is given ONLY the structured evidence
+   gathered below as context (so it can't fabricate facts not in evidence).
+ - Deterministic template mode (default / fallback): builds the answer with
+   plain Python string templates from the same structured evidence, so the
+   system works fully with zero external dependencies.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Optional
+
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.services.fraud_service import get_cached_transaction
+from app.services.merchant_service import get_merchant_risk, investigate_merchant
+
+logger = logging.getLogger(__name__)
+
+
+def _gather_evidence(db: Session, transaction_id: Optional[str], merchant_id: Optional[str]) -> dict:
+    evidence = {"transaction": None, "merchant": None}
+
+    if transaction_id:
+        record = get_cached_transaction(db, transaction_id)
+        if record:
+            evidence["transaction"] = {
+                "transaction_id": record.transaction_id,
+                "fraud_probability": record.fraud_probability,
+                "risk_score": record.risk_score,
+                "risk_level": record.risk_level,
+                "recommended_decision": record.recommended_decision,
+                "explanation": record.explanation,
+            }
+
+    if merchant_id:
+        investigation = investigate_merchant(merchant_id)
+        if investigation:
+            evidence["merchant"] = investigation
+
+    return evidence
+
+
+def _deterministic_answer(message: str, evidence: dict) -> dict:
+    txn = evidence.get("transaction")
+    merchant = evidence.get("merchant")
+
+    if txn:
+        answer = (
+            f"Transaction {txn['transaction_id']} was scored at risk level {txn['risk_level']} "
+            f"(risk score {txn['risk_score']}/100, model fraud probability "
+            f"{txn['fraud_probability']:.2%}), leading to a recommended decision of "
+            f"{txn['recommended_decision']}. {txn['explanation']}"
+        )
+        key_findings = [
+            f"Risk level: {txn['risk_level']}",
+            f"Recommended decision: {txn['recommended_decision']}",
+            f"Model fraud probability: {txn['fraud_probability']:.2%}",
+        ]
+        evidence_list = [{"type": "model_score", "detail": txn}]
+        recommended_action = {
+            "ALLOW": "No action required; continue standard processing.",
+            "REVIEW": "Route to an analyst for manual review before settlement.",
+            "HOLD": "Hold the transaction and escalate to fraud operations immediately.",
+        }.get(txn["recommended_decision"], "Route to an analyst for manual review.")
+        return {
+            "answer": answer,
+            "risk_score": txn["risk_score"],
+            "decision": txn["recommended_decision"],
+            "key_findings": key_findings,
+            "evidence": evidence_list,
+            "recommended_action": recommended_action,
+        }
+
+    if merchant:
+        answer = merchant["ai_investigation_summary"] + " " + merchant["limitations"]
+        return {
+            "answer": answer,
+            "risk_score": merchant["risk_score"],
+            "decision": None,
+            "key_findings": merchant["risk_signals"],
+            "evidence": [{"type": "merchant_aggregation", "detail": {
+                "transaction_volume": merchant["transaction_volume"],
+                "fraud_rate": merchant["fraud_rate"],
+                "trend": merchant["trend"],
+            }}],
+            "recommended_action": "Review top suspicious transactions listed for this entity before making a merchant-level decision.",
+        }
+
+    return {
+        "answer": (
+            "I don't have a scored transaction or investigated entity matching what you asked for. "
+            "Please provide a valid transaction_id (previously scored via /api/transactions/predict) "
+            "or merchant_id."
+        ),
+        "risk_score": None,
+        "decision": None,
+        "key_findings": [],
+        "evidence": [],
+        "recommended_action": "Provide a valid transaction_id or merchant_id and try again.",
+    }
+
+
+def _llm_answer(message: str, evidence: dict) -> Optional[dict]:
+    """Best-effort LLM-backed phrasing. Returns None on any failure so the
+    caller falls back to the deterministic engine. The LLM is only allowed to
+    phrase/summarize the evidence dict — it is instructed not to add facts."""
+    if not settings.LLM_API_KEY or not settings.LLM_PROVIDER:
+        return None
+    try:
+        # Abstraction layer: only anthropic is wired up as an example; add
+        # other providers here following the same interface.
+        if settings.LLM_PROVIDER == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic(api_key=settings.LLM_API_KEY)
+            system_prompt = (
+                "You are a fraud-risk copilot. Answer the user's question using ONLY the "
+                "JSON evidence provided. Never invent transaction facts not present in the "
+                "evidence. If evidence is empty, say so plainly."
+            )
+            resp = client.messages.create(
+                model=settings.LLM_MODEL or "claude-sonnet-4-6",
+                max_tokens=500,
+                system=system_prompt,
+                messages=[{"role": "user", "content": f"Question: {message}\n\nEvidence: {evidence}"}],
+            )
+            text = "".join(b.text for b in resp.content if hasattr(b, "text"))
+            base = _deterministic_answer(message, evidence)
+            base["answer"] = text
+            return base
+    except Exception as e:
+        logger.warning("LLM copilot call failed, falling back to deterministic engine: %s", e)
+    return None
+
+
+def answer_question(db: Session, message: str, transaction_id: Optional[str], merchant_id: Optional[str]) -> dict:
+    evidence = _gather_evidence(db, transaction_id, merchant_id)
+
+    llm_result = _llm_answer(message, evidence)
+    if llm_result is not None:
+        llm_result["engine"] = "llm"
+        return llm_result
+
+    result = _deterministic_answer(message, evidence)
+    result["engine"] = "deterministic_template"
+    return result

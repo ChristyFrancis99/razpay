@@ -1,0 +1,26 @@
+{
+  "threshold_used": 0.5,
+  "precision": 0.0616,
+  "recall_fraud": 0.5208,
+  "f1": 0.1101,
+  "roc_auc": 0.6258,
+  "pr_auc": 0.0874,
+  "confusion_matrix": {
+    "labels": [
+      "legit(0)",
+      "fraud(1)"
+    ],
+    "matrix": [
+      [
+        771,
+        381
+      ],
+      [
+        23,
+        25
+      ]
+    ]
+  },
+  "n_samples": 1200,
+  "n_fraud": 48
+}

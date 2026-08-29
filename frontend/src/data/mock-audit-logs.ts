@@ -1,0 +1,19 @@
+import type { AuditLogEntry } from "@/types/audit";
+
+export const mockAuditLogs: AuditLogEntry[] = [
+  { id: "AUD-9001", timestamp: "2026-08-29 14:32", actor: "P. Raghavan", actorRole: "Senior Analyst", action: "Decision Updated", entity: "TXN-92831", previousDecision: "REVIEW", newDecision: "HOLD", reason: "Device reuse confirmed across 6 accounts." },
+  { id: "AUD-9002", timestamp: "2026-08-29 14:18", actor: "AI Risk Manager", actorRole: "System", action: "Investigation Completed", entity: "TXN-92831", previousDecision: null, newDecision: "REVIEW", reason: "5 contributing factors correlated across 4 evidence sources." },
+  { id: "AUD-9003", timestamp: "2026-08-29 13:58", actor: "S. Menon", actorRole: "Fraud Lead", action: "Decision Confirmed", entity: "TXN-90042", previousDecision: "HOLD", newDecision: "HOLD", reason: "Card testing pattern verified with issuer." },
+  { id: "AUD-9004", timestamp: "2026-08-29 13:44", actor: "S. Menon", actorRole: "Fraud Lead", action: "Case Escalated", entity: "INV-2202", previousDecision: null, newDecision: null, reason: "Escalated to financial crime unit." },
+  { id: "AUD-9005", timestamp: "2026-08-29 13:41", actor: "Policy Engine v4.2", actorRole: "System", action: "Auto Decision", entity: "TXN-90011", previousDecision: null, newDecision: "ALLOW", reason: "Score 44 below review threshold." },
+  { id: "AUD-9006", timestamp: "2026-08-29 12:55", actor: "A. Deshmukh", actorRole: "Analyst", action: "Note Added", entity: "TXN-90066", previousDecision: null, newDecision: null, reason: "Requested fulfilment address confirmation from merchant." },
+  { id: "AUD-9007", timestamp: "2026-08-29 12:20", actor: "A. Deshmukh", actorRole: "Analyst", action: "Decision Updated", entity: "TXN-90066", previousDecision: "ALLOW", newDecision: "REVIEW", reason: "Shipping address changed post-authorisation." },
+  { id: "AUD-9008", timestamp: "2026-08-29 11:47", actor: "P. Raghavan", actorRole: "Senior Analyst", action: "Decision Updated", entity: "TXN-90005", previousDecision: "REVIEW", newDecision: "ALLOW", reason: "Step-up authentication passed; travel notice on file." },
+  { id: "AUD-9009", timestamp: "2026-08-29 11:02", actor: "Risk Ops", actorRole: "Admin", action: "Threshold Changed", entity: "policy/risk-thresholds", previousDecision: null, newDecision: null, reason: "HIGH band lower bound moved from 65 to 61." },
+  { id: "AUD-9010", timestamp: "2026-08-29 10:36", actor: "S. Menon", actorRole: "Fraud Lead", action: "Decision Updated", entity: "TXN-90019", previousDecision: "HOLD", newDecision: "REVIEW", reason: "Counterparty is an existing verified beneficiary." },
+  { id: "AUD-9011", timestamp: "2026-08-29 09:58", actor: "AI Risk Manager", actorRole: "System", action: "Merchant Investigation", entity: "MRC-1001", previousDecision: null, newDecision: null, reason: "Fraud concentration up 62% over 30 days." },
+  { id: "AUD-9012", timestamp: "2026-08-29 09:14", actor: "Risk Engine", actorRole: "System", action: "Transaction Scored", entity: "TXN-92831", previousDecision: null, newDecision: "REVIEW", reason: "Model v4.2 score 87/100 (CRITICAL)." },
+  { id: "AUD-9013", timestamp: "2026-08-28 22:14", actor: "A. Deshmukh", actorRole: "Analyst", action: "Decision Updated", entity: "TXN-90071", previousDecision: "REVIEW", newDecision: "HOLD", reason: "Synthetic identity indicators on originating account." },
+  { id: "AUD-9014", timestamp: "2026-08-28 20:05", actor: "Risk Ops", actorRole: "Admin", action: "Access Granted", entity: "user/a.deshmukh", previousDecision: null, newDecision: null, reason: "Added to merchant investigation role." },
+  { id: "AUD-9015", timestamp: "2026-08-28 18:47", actor: "AI Risk Manager", actorRole: "System", action: "Alert Raised", entity: "ALT-5507", previousDecision: null, newDecision: null, reason: "Sanctioned counterparty proximity on wire transfer." },
+];
