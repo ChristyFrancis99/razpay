@@ -7,14 +7,11 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 
-# ---------------------------------------------------------------------------
-# Transactions
-# ---------------------------------------------------------------------------
 class TransactionPredictRequest(BaseModel):
-    TransactionID: Optional[int] = Field(None, description="Optional ID; generated if omitted")
-    TransactionAmt: float
-    TransactionDT: int = Field(..., description="Seconds relative to a reference point, per IEEE-CIS convention")
-    ProductCD: str
+    TransactionID: Optional[int] = Field(None, description="Optional dataset ID; generated if omitted")
+    TransactionAmt: float = Field(..., gt=0)
+    TransactionDT: int = Field(..., ge=0, description="Seconds relative to a reference point, per IEEE-CIS convention")
+    ProductCD: str = Field(..., min_length=1)
     card1: Optional[float] = None
     card2: Optional[float] = None
     card3: Optional[float] = None
@@ -29,7 +26,7 @@ class TransactionPredictRequest(BaseModel):
     DeviceType: Optional[str] = None
     DeviceInfo: Optional[str] = None
     extra_fields: Optional[dict[str, Any]] = Field(
-        default=None, description="Any additional raw dataset columns (C1-C14, D1-D15, M1-M9, V1-V339, id_01...)."
+        default=None, description="Additional raw dataset columns (C/D/M/V/id features)."
     )
 
     class Config:
@@ -55,15 +52,12 @@ class TransactionRiskResponse(BaseModel):
     data_source: Optional[str] = None
 
 
-# ---------------------------------------------------------------------------
-# Risk / decision engine
-# ---------------------------------------------------------------------------
 class DecisionRequest(BaseModel):
-    transaction_id: str
-    risk_score: int
+    transaction_id: str = Field(..., min_length=1)
+    risk_score: int = Field(..., ge=0, le=100)
     override_decision: Optional[str] = None
     reason: Optional[str] = None
-    actor: Optional[str] = "system"
+    actor: Optional[str] = Field("system", min_length=1, max_length=120)
 
 
 class DecisionResponse(BaseModel):
@@ -75,9 +69,6 @@ class DecisionResponse(BaseModel):
     decision_reason: str
 
 
-# ---------------------------------------------------------------------------
-# Merchants
-# ---------------------------------------------------------------------------
 class MerchantSummary(BaseModel):
     merchant_id: str
     grouping_strategy: str
@@ -104,11 +95,8 @@ class MerchantInvestigation(BaseModel):
     limitations: str
 
 
-# ---------------------------------------------------------------------------
-# Copilot
-# ---------------------------------------------------------------------------
 class CopilotRequest(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1, max_length=4000)
     transaction_id: Optional[str] = None
     merchant_id: Optional[str] = None
 
@@ -120,19 +108,16 @@ class CopilotResponse(BaseModel):
     key_findings: list[str]
     evidence: list[dict]
     recommended_action: str
-    engine: str  # "llm" | "deterministic_template"
+    engine: str
 
 
-# ---------------------------------------------------------------------------
-# Audit
-# ---------------------------------------------------------------------------
 class AuditLogCreate(BaseModel):
-    transaction_id: str
+    transaction_id: str = Field(..., min_length=1)
     previous_decision: Optional[str] = None
     new_decision: str
-    risk_score: int
-    actor: str = "system"
-    reason: str
+    risk_score: int = Field(..., ge=0, le=100)
+    actor: str = Field("system", min_length=1, max_length=120)
+    reason: str = Field(..., min_length=5, max_length=2000)
 
 
 class AuditLogResponse(BaseModel):
@@ -149,9 +134,6 @@ class AuditLogResponse(BaseModel):
         from_attributes = True
 
 
-# ---------------------------------------------------------------------------
-# Analytics
-# ---------------------------------------------------------------------------
 class AnalyticsOverview(BaseModel):
     total_transactions: int
     fraud_transactions: int
@@ -170,3 +152,52 @@ class ModelPerformance(BaseModel):
     metrics: dict
     trained_at: Optional[str] = None
     data_source: Optional[str] = None
+
+
+class CaseCreateRequest(BaseModel):
+    transaction_id: Optional[str] = None
+    merchant_id: Optional[str] = None
+    title: str = Field(..., min_length=3, max_length=200)
+    summary: Optional[str] = Field(None, max_length=4000)
+    priority: str = "MEDIUM"
+    assigned_to: Optional[str] = Field(None, max_length=120)
+    actor: str = Field("system", min_length=1, max_length=120)
+
+
+class CaseUpdateRequest(BaseModel):
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    assigned_to: Optional[str] = Field(None, max_length=120)
+    resolution: Optional[str] = Field(None, max_length=4000)
+    actor: str = Field("system", min_length=1, max_length=120)
+    note: str = Field("Case updated", min_length=3, max_length=2000)
+
+
+class CaseEventResponse(BaseModel):
+    id: int
+    case_id: str
+    timestamp: datetime
+    actor: str
+    event_type: str
+    note: str
+
+    class Config:
+        from_attributes = True
+
+
+class CaseResponse(BaseModel):
+    case_id: str
+    transaction_id: Optional[str]
+    merchant_id: Optional[str]
+    status: str
+    priority: str
+    assigned_to: Optional[str]
+    title: str
+    summary: Optional[str]
+    resolution: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    closed_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
