@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.database.database import get_db
@@ -32,8 +33,6 @@ def make_decision(payload: DecisionRequest, db: Session = Depends(get_db)):
     if not record:
         raise HTTPException(status_code=404, detail=f"Transaction '{payload.transaction_id}' not found.")
 
-    # Never trust a client-supplied risk score for an existing transaction.
-    # The persisted model result is the source of truth for the audit record.
     risk_score = int(record.risk_score)
     if payload.risk_score != risk_score:
         raise HTTPException(status_code=409, detail="Risk score is stale. Refresh the transaction before recording a decision.")
@@ -48,18 +47,23 @@ def make_decision(payload: DecisionRequest, db: Session = Depends(get_db)):
 
     final_decision = override or recommended
     previous_decision = record.final_decision or record.recommended_decision
-    record.final_decision = final_decision
-    db.commit()
 
-    audit_service.create_audit_log(
-        db,
-        transaction_id=payload.transaction_id,
-        previous_decision=previous_decision,
-        new_decision=final_decision,
-        risk_score=risk_score,
-        actor=payload.actor or "system",
-        reason=payload.reason.strip(),
-    )
+    try:
+        record.final_decision = final_decision
+        audit_service.create_audit_log(
+            db,
+            transaction_id=payload.transaction_id,
+            previous_decision=previous_decision,
+            new_decision=final_decision,
+            risk_score=risk_score,
+            actor=payload.actor or "system",
+            reason=payload.reason.strip(),
+            commit=False,
+        )
+        db.commit()
+    except (SQLAlchemyError, ValueError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Could not persist the risk decision and audit event.") from exc
 
     return DecisionResponse(
         transaction_id=payload.transaction_id,
