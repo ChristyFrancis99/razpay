@@ -23,17 +23,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Risk Intelligence Platform API", description="Explainable Fraud Agent, Merchant Risk Investigator, Transaction Copilot, and investigation case management.", version="2.1.1", lifespan=lifespan)
 
-# In development, Vite may select another port when 5173 is occupied. Allow
-# localhost/127.0.0.1 development origins while keeping production origins
-# explicitly configured through CORS_ORIGINS.
-cors_kwargs = {
-    "allow_origins": [o.strip() for o in settings.CORS_ORIGINS if o.strip()],
-    "allow_credentials": True,
-    "allow_methods": ["*"],
-    "allow_headers": ["*"],
-}
+# Development must support Vite selecting any available localhost port. The
+# production configuration remains restricted to the explicit CORS_ORIGINS.
 if settings.ENVIRONMENT == "development":
-    cors_kwargs["allow_origin_regex"] = r"https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+    cors_kwargs = {
+        "allow_origins": [o.strip() for o in settings.CORS_ORIGINS if o.strip()],
+        "allow_origin_regex": r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+        "allow_credentials": True,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+else:
+    cors_kwargs = {
+        "allow_origins": [o.strip() for o in settings.CORS_ORIGINS if o.strip()],
+        "allow_credentials": True,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
 app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 @app.middleware("http")
