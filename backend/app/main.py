@@ -2,15 +2,18 @@
 from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from app.core.config import settings
+from app.core.security import decode_access_token
 from app.database.database import SessionLocal, init_db
 from app.api import routes_auth, routes_transactions, routes_merchants, routes_risk, routes_copilot, routes_analytics, routes_audit, routes_cases
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+PUBLIC_PATHS = {"/api/health", "/api/health/ready", "/api/auth/login", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -20,6 +23,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Risk Intelligence Platform API", description="Explainable Fraud Agent, Merchant Risk Investigator, Transaction Copilot, and investigation case management.", version="2.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in settings.CORS_ORIGINS if o.strip()], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+@app.middleware("http")
+async def authentication_middleware(request: Request, call_next):
+    if request.method == "OPTIONS" or request.url.path in PUBLIC_PATHS or not request.url.path.startswith("/api/"):
+        return await call_next(request)
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Bearer "):
+        return JSONResponse(status_code=401, content={"detail": "Authentication required"}, headers={"WWW-Authenticate": "Bearer"})
+    try:
+        request.state.user = decode_access_token(authorization[7:].strip())
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers={"WWW-Authenticate": "Bearer"})
+    return await call_next(request)
 
 @app.get("/api/health", tags=["health"])
 def health():
