@@ -4,12 +4,12 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.core.config import settings
-from app.database.database import get_db, init_db
+from app.database.database import SessionLocal, init_db
 from app.api import (
     routes_transactions,
     routes_merchants,
@@ -53,7 +53,7 @@ def health():
 
     model = get_model_bundle()
     database_ok = False
-    db = next(get_db())
+    db = SessionLocal()
     try:
         db.execute(text("SELECT 1"))
         database_ok = True
@@ -75,8 +75,12 @@ def readiness():
 
     model = get_model_bundle()
     if not model.is_ready:
-        from fastapi import HTTPException
         raise HTTPException(status_code=503, detail="Model is not ready. Train/load the model before serving predictions.")
+    db = SessionLocal()
+    try:
+        db.execute(text("SELECT 1"))
+    finally:
+        db.close()
     return {"status": "ready", "model_name": model.metadata.get("model_name"), "data_source": model.metadata.get("data_source")}
 
 
