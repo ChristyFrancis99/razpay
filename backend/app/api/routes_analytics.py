@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -12,25 +13,14 @@ from app.database.database import get_db
 from app.database.models import ScoredTransaction
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+LEVELS = ("LOW", "MEDIUM", "HIGH", "CRITICAL")
+DECISIONS = ("ALLOW", "REVIEW", "HOLD")
 
 
 @router.get("/overview")
 def overview(db: Session = Depends(get_db)):
     total = db.query(func.count(ScoredTransaction.id)).scalar() or 0
-    if total == 0:
-        return {
-            "total_transactions": 0,
-            "fraud_transactions": 0,
-            "fraud_rate": 0.0,
-            "high_risk_transactions": 0,
-            "critical_transactions": 0,
-            "allow_count": 0,
-            "review_count": 0,
-            "hold_count": 0,
-            "average_risk_score": 0.0,
-            "note": "No transactions have been scored yet. Call POST /api/transactions/predict first.",
-        }
-
+    fraud_like = db.query(func.count(ScoredTransaction.id)).filter(ScoredTransaction.risk_level.in_(["HIGH", "CRITICAL"])).scalar() or 0
     high_risk = db.query(func.count(ScoredTransaction.id)).filter(ScoredTransaction.risk_level == "HIGH").scalar() or 0
     critical = db.query(func.count(ScoredTransaction.id)).filter(ScoredTransaction.risk_level == "CRITICAL").scalar() or 0
     avg_score = db.query(func.avg(ScoredTransaction.risk_score)).scalar() or 0.0
@@ -40,17 +30,18 @@ def overview(db: Session = Depends(get_db)):
             func.coalesce(ScoredTransaction.final_decision, ScoredTransaction.recommended_decision) == decision
         ).scalar() or 0
 
-    fraud_like = db.query(func.count(ScoredTransaction.id)).filter(ScoredTransaction.risk_level.in_(["HIGH", "CRITICAL"])).scalar() or 0
-
     return {
         "total_transactions": total,
+        "fraud_transactions": fraud_like,
+        "fraud_rate": round((fraud_like / total) * 100, 2) if total else 0.0,
         "high_risk_transactions": high_risk,
         "critical_transactions": critical,
         "allow_count": decision_count("ALLOW"),
         "review_count": decision_count("REVIEW"),
         "hold_count": decision_count("HOLD"),
         "average_risk_score": round(float(avg_score), 2),
-        "note": "These stats cover transactions scored through this API session/DB, not the full training dataset.",
+        "data_source": "scored_transaction_cache",
+        "note": "Operational statistics cover transactions scored through this API, not the training dataset.",
     }
 
 
@@ -60,13 +51,15 @@ def model_performance():
     metrics_path = Path(settings.REPORTS_DIR) / "metrics.json"
     if not metadata_path.exists():
         raise HTTPException(status_code=503, detail="Model has not been trained yet. Run `python -m app.ml.train`.")
-
-    with open(metadata_path) as f:
-        metadata = json.load(f)
-    metrics = {}
-    if metrics_path.exists():
-        with open(metrics_path) as f:
-            metrics = json.load(f)
+    try:
+        with open(metadata_path, encoding="utf-8") as f:
+            metadata = json.load(f)
+        metrics = {}
+        if metrics_path.exists():
+            with open(metrics_path, encoding="utf-8") as f:
+                metrics = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail="Model metadata is unavailable or invalid.") from exc
 
     return {
         "model_name": metadata.get("model_name"),
@@ -80,11 +73,44 @@ def model_performance():
 
 @router.get("/risk-distribution")
 def risk_distribution(db: Session = Depends(get_db)):
-    rows = (
-        db.query(ScoredTransaction.risk_level, func.count(ScoredTransaction.id))
-        .group_by(ScoredTransaction.risk_level).all()
-    )
-    distribution = {level: count for level, count in rows}
-    for level in ("LOW", "MEDIUM", "HIGH", "CRITICAL"):
-        distribution.setdefault(level, 0)
+    rows = db.query(ScoredTransaction.risk_level, func.count(ScoredTransaction.id)).group_by(ScoredTransaction.risk_level).all()
+    distribution = {level: 0 for level in LEVELS}
+    distribution.update({level: count for level, count in rows})
     return {"risk_distribution": distribution}
+
+
+@router.get("/trend")
+def risk_trend(
+    days: int = Query(7, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    since = datetime.utcnow() - timedelta(days=days)
+    rows = (
+        db.query(
+            func.date(ScoredTransaction.created_at).label("day"),
+            func.count(ScoredTransaction.id).label("transactions"),
+            func.avg(ScoredTransaction.risk_score).label("average_risk_score"),
+        )
+        .filter(ScoredTransaction.created_at >= since)
+        .group_by(func.date(ScoredTransaction.created_at))
+        .order_by(func.date(ScoredTransaction.created_at))
+        .all()
+    )
+    return {
+        "days": days,
+        "points": [
+            {"date": str(day), "transactions": int(count), "average_risk_score": round(float(avg), 2)}
+            for day, count, avg in rows
+        ],
+    }
+
+
+@router.get("/decision-distribution")
+def decision_distribution(db: Session = Depends(get_db)):
+    rows = db.query(
+        func.coalesce(ScoredTransaction.final_decision, ScoredTransaction.recommended_decision),
+        func.count(ScoredTransaction.id),
+    ).group_by(func.coalesce(ScoredTransaction.final_decision, ScoredTransaction.recommended_decision)).all()
+    distribution = {decision: 0 for decision in DECISIONS}
+    distribution.update({decision: count for decision, count in rows})
+    return {"decision_distribution": distribution}
