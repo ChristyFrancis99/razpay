@@ -10,7 +10,6 @@ backend/*.sqlite
 backend/*.sqlite3
 
 # Python
-a__pycache__/
 __pycache__/
 *.py[cod]
 .venv/
