@@ -2,7 +2,7 @@
 
 This script intentionally does NOT copy the IEEE-CIS dataset into the repository.
 It reads the user's local CSVs in chunks, scores a small representative sample with
-THE SAME inference pipeline used by the API, and persists only the scored results
+the SAME inference pipeline used by the API, and persists only the scored results
 needed by the dashboard.
 
 Run from the backend directory:
@@ -118,8 +118,10 @@ def _merge_identity(candidates: pd.DataFrame, identity_path: Path) -> pd.DataFra
 
 def _json_safe(value: Any) -> Any:
     if isinstance(value, np.generic):
-        return value.item()
-    if pd.isna(value) if not isinstance(value, (list, tuple, dict)) else False:
+        value = value.item()
+    if value is None or value is pd.NA:
+        return None
+    if isinstance(value, float) and np.isnan(value):
         return None
     return value
 
@@ -143,19 +145,28 @@ def _row_to_dict(row: pd.Series) -> dict[str, Any]:
 
 def _select_balanced(scored: list[dict[str, Any]], rows: int) -> list[dict[str, Any]]:
     """Prefer a useful LOW/MEDIUM/HIGH/CRITICAL mix, then fill remaining slots."""
+    low_quota = max(1, round(rows * 0.30))
+    medium_quota = max(1, round(rows * 0.25))
+    high_quota = max(1, round(rows * 0.25))
+    critical_quota = max(1, rows - low_quota - medium_quota - high_quota)
     quotas = {
-        "LOW": max(1, round(rows * 0.30)),
-        "MEDIUM": max(1, round(rows * 0.25)),
-        "HIGH": max(1, round(rows * 0.25)),
-        "CRITICAL": max(1, rows - round(rows * 0.30) - round(rows * 0.25) - round(rows * 0.25)),
+        "LOW": low_quota,
+        "MEDIUM": medium_quota,
+        "HIGH": high_quota,
+        "CRITICAL": critical_quota,
     }
+
     buckets: dict[str, list[dict[str, Any]]] = {level: [] for level in quotas}
     for item in scored:
-        buckets.get(item["risk_level"], []).append(item)
+        level = item.get("risk_level")
+        if level in buckets:
+            buckets[level].append(item)
 
     selected: list[dict[str, Any]] = []
     for level, quota in quotas.items():
-        bucket = sorted(buckets[level], key=lambda x: x["fraud_probability"], reverse=level in {"HIGH", "CRITICAL"})
+        # For higher-risk buckets choose the strongest examples; for LOW choose the safest.
+        reverse = level in {"HIGH", "CRITICAL"}
+        bucket = sorted(buckets[level], key=lambda x: x["fraud_probability"], reverse=reverse)
         selected.extend(bucket[:quota])
 
     if len(selected) < rows:
@@ -186,14 +197,11 @@ def main() -> int:
             db.commit()
             logger.warning("Cleared %d existing scored transactions.", deleted)
 
-        existing = {
-            row[0]
-            for row in db.query(ScoredTransaction.transaction_id).all()
-        }
+        existing = {row[0] for row in db.query(ScoredTransaction.transaction_id).all()}
 
-        # Pool is split evenly by isFraud so the demo has a chance to expose a
-        # meaningful range of model outputs instead of selecting only normal rows.
-        pool_per_class = max(args.candidate_pool // 2, args.rows)
+        # Split the candidate pool evenly by isFraud so the demo has a chance to expose
+        # a meaningful range of model outputs instead of selecting only normal rows.
+        pool_per_class = max(1, (args.candidate_pool + 1) // 2)
         candidates = _sample_candidates(txn_path, pool_per_class=pool_per_class, seed=args.seed)
         candidates = candidates[~candidates["TransactionID"].astype(str).isin(existing)].copy()
         candidates = _merge_identity(candidates, identity_path)
@@ -204,7 +212,7 @@ def main() -> int:
             return 0
 
         scored: list[dict[str, Any]] = []
-        for index, (_, row) in enumerate(candidates.iterrows(), start=1):
+        for _, row in candidates.iterrows():
             try:
                 raw = _row_to_dict(row)
                 result = score_and_explain(raw, db=None)
