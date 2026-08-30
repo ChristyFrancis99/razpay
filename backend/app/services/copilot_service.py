@@ -16,15 +16,40 @@ Two modes:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.services.fraud_service import get_cached_transaction
-from app.services.merchant_service import get_merchant_risk, investigate_merchant
+from app.services.fraud_service import get_cached_transaction, list_cached_transactions
+from app.services.merchant_service import investigate_merchant
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_transaction_context(db: Session, message: str, transaction_id: Optional[str]) -> Optional[str]:
+    """Resolve transaction context without requiring the UI to know an ID.
+
+    Priority:
+    1. Explicit transaction_id supplied by the frontend.
+    2. A TXN-* identifier mentioned in the user's message.
+    3. The most recently scored transaction, which is the natural context for
+       questions such as "why was this transaction flagged?" from the Copilot.
+
+    We never fabricate an ID. If an explicit TXN-* ID is mentioned but is not
+    cached, it is returned unchanged so the normal evidence-missing response
+    is shown instead of silently answering about a different transaction.
+    """
+    if transaction_id:
+        return transaction_id
+
+    match = re.search(r"\bTXN-[A-Z0-9_-]+\b", message.upper())
+    if match:
+        return match.group(0)
+
+    latest = list_cached_transactions(db, limit=1)
+    return latest[0].transaction_id if latest else None
 
 
 def _gather_evidence(db: Session, transaction_id: Optional[str], merchant_id: Optional[str]) -> dict:
@@ -99,14 +124,13 @@ def _deterministic_answer(message: str, evidence: dict) -> dict:
     return {
         "answer": (
             "I don't have a scored transaction or investigated entity matching what you asked for. "
-            "Please provide a valid transaction_id (previously scored via /api/transactions/predict) "
-            "or merchant_id."
+            "Please score a transaction first via /api/transactions/predict, then ask again."
         ),
         "risk_score": None,
         "decision": None,
         "key_findings": [],
         "evidence": [],
-        "recommended_action": "Provide a valid transaction_id or merchant_id and try again.",
+        "recommended_action": "Score at least one transaction or provide a valid merchant_id and try again.",
     }
 
 
@@ -143,7 +167,8 @@ def _llm_answer(message: str, evidence: dict) -> Optional[dict]:
 
 
 def answer_question(db: Session, message: str, transaction_id: Optional[str], merchant_id: Optional[str]) -> dict:
-    evidence = _gather_evidence(db, transaction_id, merchant_id)
+    resolved_transaction_id = _resolve_transaction_context(db, message, transaction_id)
+    evidence = _gather_evidence(db, resolved_transaction_id, merchant_id)
 
     llm_result = _llm_answer(message, evidence)
     if llm_result is not None:
