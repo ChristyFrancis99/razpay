@@ -42,6 +42,32 @@ Copy `frontend/.env.example` to `.env` when the frontend and backend run on diff
 5. Decisions are persisted and written to `/api/audit-logs`.
 6. Copilot answers evidence-oriented questions using `/api/copilot`.
 
+## Local IEEE-CIS demo data
+
+The full IEEE-CIS dataset is intentionally **not committed to GitHub**. Put the real files in `backend/data/`:
+
+```text
+backend/data/train_transaction.csv
+backend/data/train_identity.csv
+```
+
+After the trained model artifacts are available, populate the local dashboard with real model-scored transactions:
+
+```bash
+cd backend
+python -m scripts.seed_demo_data
+```
+
+The seeder reads the large CSVs in chunks, selects a representative sample, runs them through the same inference pipeline used by the live prediction API, and persists only the scored results in the local database. It never silently substitutes synthetic data.
+
+For a clean disposable local demo database:
+
+```bash
+python -m scripts.seed_demo_data --clear
+```
+
+Use `--clear` only for a local demo database; it deletes existing scored transactions.
+
 ## Model note
 
-If real IEEE-CIS files are unavailable, the backend can use its configured synthetic fallback for development/demo operation. Do not present synthetic evaluation metrics as production performance.
+If real IEEE-CIS files are unavailable, the backend can still use its configured synthetic fallback for development/demo operation. Do not present synthetic evaluation metrics as production performance. The real-data demo seeder deliberately refuses to fall back to synthetic data.
