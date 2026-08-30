@@ -5,6 +5,13 @@ from functools import lru_cache
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parents[2]
+REPO_DIR = BASE_DIR.parent
+DEFAULT_DATA_DIR = BASE_DIR / "data"
+# Keep compatibility with the repository's existing local `ieee-fraud-detection/`
+# folder while preferring backend/data for a clean deployment layout.
+if not (DEFAULT_DATA_DIR / "train_transaction.csv").exists() and (REPO_DIR / "ieee-fraud-detection" / "train_transaction.csv").exists():
+    DEFAULT_DATA_DIR = REPO_DIR / "ieee-fraud-detection"
+
 # FastAPI/uvicorn does not automatically load backend/.env. Load it before
 # constructing Settings so local bootstrap credentials and CORS settings work.
 load_dotenv(BASE_DIR / ".env", override=False)
@@ -20,7 +27,7 @@ def _get_bool(name: str, default: bool) -> bool:
 class Settings:
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     DEBUG: bool = _get_bool("DEBUG", ENVIRONMENT == "development")
-    DATA_DIR: str = os.getenv("DATA_DIR", str(BASE_DIR / "data"))
+    DATA_DIR: str = os.getenv("DATA_DIR", str(DEFAULT_DATA_DIR))
     MODEL_DIR: str = os.getenv("MODEL_DIR", str(BASE_DIR / "models"))
     REPORTS_DIR: str = os.getenv("REPORTS_DIR", str(BASE_DIR / "reports"))
     TRANSACTION_TRAIN_FILE: str = os.getenv("TRANSACTION_TRAIN_FILE", "train_transaction.csv")
