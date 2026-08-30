@@ -1,6 +1,8 @@
 # Local IEEE-CIS dataset
 
-Place the IEEE-CIS Fraud Detection CSVs directly in this `data/` folder:
+The backend looks for the IEEE-CIS Fraud Detection CSVs in `backend/data/` first. For compatibility with the existing repository layout, it also detects a local `ieee-fraud-detection/` folder at the repository root when `backend/data/train_transaction.csv` is not present.
+
+Preferred layout:
 
 ```text
 data/
@@ -23,7 +25,7 @@ python -m scripts.seed_demo_data
 
 The seed script reads the large training CSVs in chunks, selects a representative sample, runs each selected transaction through the same production inference pipeline used by `POST /api/transactions/predict`, and stores only the scored results in the local SQLite database.
 
-The script **does not silently fall back to synthetic data**. If the real IEEE-CIS CSVs are missing, it stops and tells you exactly where they must be placed.
+The script **does not silently fall back to synthetic data**. If the real IEEE-CIS CSVs are missing, it stops and tells you where they must be placed.
 
 Useful options:
 
