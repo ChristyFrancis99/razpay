@@ -1,2 +1,22 @@
-
+# Full IEEE-CIS dataset (never commit the large Kaggle files)
 ieee-fraud-detection/
+backend/data/*.csv
+backend/data/*.zip
+backend/data/*.parquet
+
+# Local runtime database
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+
+# Python
+a__pycache__/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local environment files
+.env
+backend/.env
+frontend/.env
