@@ -1,23 +1,45 @@
-# Dataset placement
+# Local IEEE-CIS dataset
 
-Download the **IEEE-CIS Fraud Detection** dataset from Kaggle:
-https://www.kaggle.com/c/ieee-fraud-detection/data
+Place the IEEE-CIS Fraud Detection CSVs directly in this `data/` folder:
 
-Place these files directly in this `data/` folder:
-
-```
+```text
 data/
   train_transaction.csv
   train_identity.csv
-  test_transaction.csv
-  test_identity.csv
-  sample_submission.csv   (optional, not used by this backend)
+  test_transaction.csv        # optional
+  test_identity.csv           # optional
+  sample_submission.csv       # optional, not used by this backend
 ```
 
-If these files are **not** present, `app/data/loader.py` will automatically
-fall back to a small synthetic dataset with the same column schema (see
-`ALLOW_SYNTHETIC_FALLBACK` / `SYNTHETIC_ROWS` in `.env`). This lets you run
-the full pipeline end-to-end for development, but **the resulting model has
-no real fraud-detection validity** — every API response and the training
-metadata will show `"data_source": "synthetic"` so this is never mistaken
-for a real result. Train on the real files for a meaningful model.
+The large CSV files are intentionally ignored by Git. Keep them on the local development machine (or a private data store), not in the public repository.
+
+## Populate the dashboard
+
+After the trained model artifacts are present, run from the `backend/` directory:
+
+```bash
+python -m scripts.seed_demo_data
+```
+
+The seed script reads the large training CSVs in chunks, selects a representative sample, runs each selected transaction through the same production inference pipeline used by `POST /api/transactions/predict`, and stores only the scored results in the local SQLite database.
+
+The script **does not silently fall back to synthetic data**. If the real IEEE-CIS CSVs are missing, it stops and tells you exactly where they must be placed.
+
+Useful options:
+
+```bash
+python -m scripts.seed_demo_data --rows 100 --candidate-pool 400
+python -m scripts.seed_demo_data --rows 150 --candidate-pool 600 --seed 42
+```
+
+For a disposable local demo database only, `--clear` removes existing scored transactions before reseeding:
+
+```bash
+python -m scripts.seed_demo_data --clear
+```
+
+Do not use `--clear` against a database containing real investigation history.
+
+## Synthetic fallback
+
+The application's normal data loader still supports its existing synthetic fallback for development when the real dataset is unavailable. That fallback is separate from the demo seeder and must not be presented as real IEEE-CIS evaluation data.
